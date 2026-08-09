@@ -44,6 +44,16 @@ std::vector<MenuItem> BuildDefaultMenu() {
         Submenu(L"File", {
             Leaf(L"Save", L"file.save"),
         }),
+        Submenu(L"Blok", {
+            Leaf(L"Označit řádkový blok - začátek", L"block.mark-line-start"),
+            Leaf(L"Označit řádkový blok - konec",   L"block.mark-line-end"),
+            Leaf(L"Označit sloupcový blok - začátek", L"block.mark-column-start"),
+            Leaf(L"Označit sloupcový blok - konec",   L"block.mark-column-end"),
+            Leaf(L"Kopírovat blok", L"block.copy"),
+            Leaf(L"Přesunout blok", L"block.move"),
+            Leaf(L"Vymazat blok",   L"block.delete"),
+            Leaf(L"Zrušit označení bloku", L"block.cancel"),
+        }),
         Submenu(L"Find", {
             Leaf(L"Search...", L"find.search"),
             Leaf(L"Next",      L"find.next"),

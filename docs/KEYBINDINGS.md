@@ -35,6 +35,16 @@ configurable keymap yet.
 | Esc          | clear the status-bar message (not a registered command) |
 | any printable character | inserted directly at the cursor |
 
+## Block selection
+
+`block.mark-line-start`, `block.mark-line-end`, `block.mark-column-start`,
+`block.mark-column-end`, `block.copy`, `block.move`, `block.delete`, and
+`block.cancel` have no dedicated key bindings — they are reachable only through the
+**F1 command menu** (`Blok` submenu), same as Find. This is a deliberate choice: every
+convenient key combination (F2–F12, Ctrl+<letter/digit>, Alt+<letter/digit>) is already
+reserved for macro hotkeys — see [COMMANDS.md](COMMANDS.md#block-selection) for what each
+command does.
+
 ## Find
 
 `find.search`, `find.next`, and `find.previous` have no dedicated key bindings — they are

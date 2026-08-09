@@ -393,6 +393,41 @@ void OnPaint(HWND window, WindowState* state) {
 
     const size_t top = state->editor.TopLine();
     const size_t left = state->editor.LeftCol();
+
+    if (state->editor.HasSelection()) {
+        const Selection& sel = state->editor.CurrentSelection();
+        Cursor lo = sel.anchor;
+        Cursor hi = sel.end;
+        if (lo.line > hi.line || (lo.line == hi.line && lo.col > hi.col)) std::swap(lo, hi);
+        const size_t colLo = (std::min)(lo.col, hi.col);
+        const size_t colHi = (std::max)(lo.col, hi.col);
+
+        HBRUSH highlight = CreateSolidBrush(RGB(200, 220, 255));
+        for (size_t row = 0; row < state->visibleLines; ++row) {
+            const size_t index = top + row;
+            if (index >= state->editor.LineCount()) break;
+            if (index < lo.line || index > hi.line) continue;
+
+            size_t colStart = 0;
+            size_t colEnd   = ExpandTabs(state->editor.Line(index)).size();
+            if (sel.mode == BlockMode::Column) {
+                colStart = colLo;
+                colEnd   = colHi;
+            }
+            if (colEnd <= left || colEnd <= colStart) continue;
+            const size_t visStart = (colStart > left) ? colStart - left : 0;
+            const size_t visEnd   = colEnd - left;
+
+            RECT hlRect = {
+                static_cast<LONG>(visStart) * state->charWidth,
+                state->statusHeight + static_cast<int>(row) * state->lineHeight,
+                static_cast<LONG>(visEnd) * state->charWidth,
+                state->statusHeight + static_cast<int>(row + 1) * state->lineHeight};
+            FillRect(memDc, &hlRect, highlight);
+        }
+        DeleteObject(highlight);
+    }
+
     for (size_t row = 0; row < state->visibleLines; ++row) {
         const size_t index = top + row;
         if (index >= state->editor.LineCount()) break;

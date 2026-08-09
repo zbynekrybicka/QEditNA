@@ -112,6 +112,70 @@ void RegisterBuiltinCommands(CommandEngine& engine) {
                         return ok;
                     });
 
+    engine.Register(L"block.mark-line-start", L"Start marking a line block at the cursor",
+                    [](CommandContext& ctx) {
+                        ctx.editor->BlockMarkStart(BlockMode::Line);
+                        ctx.message = L"Označování řádkového bloku spuštěno.";
+                        return true;
+                    });
+    engine.Register(L"block.mark-line-end", L"Lock the line block being marked",
+                    [](CommandContext& ctx) {
+                        if (!ctx.editor->HasSelection()) {
+                            ctx.message = L"Není spuštěno žádné označování.";
+                            return false;
+                        }
+                        ctx.editor->BlockMarkEnd();
+                        ctx.message = L"Řádkový blok označen.";
+                        return true;
+                    });
+    engine.Register(L"block.mark-column-start", L"Start marking a column block at the cursor",
+                    [](CommandContext& ctx) {
+                        ctx.editor->BlockMarkStart(BlockMode::Column);
+                        ctx.message = L"Označování sloupcového bloku spuštěno.";
+                        return true;
+                    });
+    engine.Register(L"block.mark-column-end", L"Lock the column block being marked",
+                    [](CommandContext& ctx) {
+                        if (!ctx.editor->HasSelection()) {
+                            ctx.message = L"Není spuštěno žádné označování.";
+                            return false;
+                        }
+                        ctx.editor->BlockMarkEnd();
+                        ctx.message = L"Sloupcový blok označen.";
+                        return true;
+                    });
+    engine.Register(L"block.copy", L"Copy the marked block to the cursor",
+                    [](CommandContext& ctx) {
+                        std::wstring message;
+                        const bool ok = ctx.editor->BlockCopy(&message);
+                        ctx.message = message;
+                        return ok;
+                    });
+    engine.Register(L"block.move", L"Move the marked block to the cursor",
+                    [](CommandContext& ctx) {
+                        std::wstring message;
+                        const bool ok = ctx.editor->BlockMove(&message);
+                        ctx.message = message;
+                        return ok;
+                    });
+    engine.Register(L"block.delete", L"Delete the marked block's content",
+                    [](CommandContext& ctx) {
+                        std::wstring message;
+                        const bool ok = ctx.editor->BlockDelete(&message);
+                        ctx.message = message;
+                        return ok;
+                    });
+    engine.Register(L"block.cancel", L"Cancel the current block selection",
+                    [](CommandContext& ctx) {
+                        if (!ctx.editor->HasSelection()) {
+                            ctx.message = L"Není označen žádný blok.";
+                            return false;
+                        }
+                        ctx.editor->BlockCancel();
+                        ctx.message = L"Označení bloku zrušeno.";
+                        return true;
+                    });
+
     engine.Register(L"file.save", L"Write the buffer to disk", [](CommandContext& ctx) {
         std::wstring message;
         const bool ok = ctx.editor->SaveToFile(&message);

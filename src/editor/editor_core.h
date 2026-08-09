@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../io/file_io.h"
@@ -11,6 +12,19 @@ namespace qed {
 struct Cursor {
     size_t line = 0;   // 0-based index into the buffer
     size_t col  = 0;   // 0-based character offset within the line
+};
+
+enum class BlockMode { None, Line, Column };
+
+// A marked block. `anchor` is where marking started; `end` tracks the cursor
+// while marking is in progress and freezes once the block is locked
+// (BlockMarkEnd). Line blocks cover whole lines between anchor.line and
+// end.line; column blocks cover the rectangle between the two positions.
+struct Selection {
+    BlockMode mode   = BlockMode::None;
+    Cursor    anchor;
+    Cursor    end;
+    bool      locked = false;
 };
 
 // Line-based buffer. Simple and predictable; a gap buffer can replace it later
@@ -63,6 +77,29 @@ public:
     bool FindPrevious(std::wstring* messageOut);
     const std::wstring& LastSearchTerm() const { return lastSearchTerm_; }
 
+    // --- block selection ---
+    // Cancels any existing selection and starts marking a new one of the
+    // given mode, anchored at the cursor.
+    void BlockMarkStart(BlockMode mode);
+    // Freezes the current selection so further cursor movement no longer
+    // resizes it. No-op if nothing is being marked.
+    void BlockMarkEnd();
+    // Clears the selection without touching the buffer.
+    void BlockCancel();
+
+    bool HasSelection() const { return selection_.mode != BlockMode::None; }
+    const Selection& CurrentSelection() const { return selection_; }
+
+    // Inserts a copy of the block's content at the cursor. Selection is left
+    // in place (repeatable paste). Fails if there is no selection.
+    bool BlockCopy(std::wstring* messageOut);
+    // Moves the block's content to the cursor (copy + erase original).
+    // Cancels the selection. Fails if there is no selection.
+    bool BlockMove(std::wstring* messageOut);
+    // Erases the block's content in place. Cancels the selection. Fails if
+    // there is no selection.
+    bool BlockDelete(std::wstring* messageOut);
+
     // --- viewport ---
     size_t TopLine() const { return topLine_; }
     size_t LeftCol() const { return leftCol_; }
@@ -72,9 +109,14 @@ public:
 
 private:
     void ClampCursor();
+    void UpdateSelectionExtent();   // called after every cursor move
+    std::pair<Cursor, Cursor> NormalizedSelection() const;   // (min, max)
+    std::vector<std::wstring> ExtractBlock() const;
+    void EraseBlock();
 
     std::vector<std::wstring> lines_;
     Cursor                    cursor_;
+    Selection                 selection_;
     std::wstring              path_;
     bool                      modified_   = false;
     unsigned long long        byteSize_   = 0;

@@ -47,6 +47,34 @@ and can play it back. See [MACROS.md](MACROS.md).
 |---------------|----------------------------------------------|---------|
 | `file.save`    | Write the buffer to disk (subject to the write-protect flag — see [ARCHITECTURE.md](ARCHITECTURE.md)) | Ctrl+S |
 
+## Block selection
+
+Reachable only through the F1 command menu's **Blok** submenu — no dedicated key
+bindings (see [KEYBINDINGS.md](KEYBINDINGS.md#block-selection)). Implemented on
+`EditorCore` (`BlockMarkStart`/`BlockMarkEnd`/`BlockCancel`/`BlockCopy`/`BlockMove`/
+`BlockDelete`, `src/editor/editor_core.h/cpp`) around a `Selection` (`BlockMode`
+`Line`/`Column`, an `anchor` and an `end` position).
+
+A **line block** marks whole lines between the start and end positions. A
+**column block** marks the rectangle between them — same rows, but only the
+columns between the two cursor positions on each row.
+
+| Command                      | Effect |
+|-------------------------------|--------|
+| `block.mark-line-start`        | Cancels any existing selection and starts marking a line block anchored at the cursor. Moving the cursor afterwards grows/shrinks the selection to whole lines between anchor and cursor. |
+| `block.mark-line-end`          | Locks the line block currently being marked — further cursor movement no longer resizes it. Fails if nothing is being marked. |
+| `block.mark-column-start`      | Same as `block.mark-line-start` but for a column (rectangular) block. |
+| `block.mark-column-end`        | Locks the column block currently being marked. Fails if nothing is being marked. |
+| `block.copy`                   | Inserts a copy of the marked block's content at the cursor. The selection is left in place, so the same block can be pasted again. Fails if nothing is selected. |
+| `block.move`                   | Moves the marked block's content to the cursor (copy, then erase the original). Cancels the selection afterwards. Fails if nothing is selected. |
+| `block.delete`                 | Erases the marked block's content in place. Cancels the selection afterwards. Fails if nothing is selected. |
+| `block.cancel`                 | Clears the current selection without touching the buffer. Fails if nothing is selected. |
+
+The selection is **not** cleared by ordinary typing or editing once locked — it
+persists until `block.copy`'s implicit keep, `block.move`/`block.delete`'s implicit
+cancel, or an explicit `block.cancel`. There is no system clipboard integration;
+block content only ever moves within the buffer via the cursor position.
+
 ## Find
 
 Case-insensitive substring search (no regular expressions). Reachable only through the
@@ -106,7 +134,7 @@ don't have.
 
 Besides the hardcoded key bindings above, every command is also reachable through the
 **F1 command menu** (`src/ui/command_menu.h/cpp`): a static tree of submenus (Cursor,
-Edit, File, Find, Makra — mirroring the groups on this page) navigated with
+Edit, Blok, File, Find, Makra — mirroring the groups on this page) navigated with
 Up/Down/Left/Right and confirmed with Enter. See [KEYBINDINGS.md](KEYBINDINGS.md#command-menu)
 for the key mapping and [ARCHITECTURE.md](ARCHITECTURE.md) for how it plugs into
 `WindowProc`.

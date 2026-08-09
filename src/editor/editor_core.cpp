@@ -72,6 +72,7 @@ void EditorCore::MoveLeft() {
         --cursor_.line;
         cursor_.col = lines_[cursor_.line].size();
     }
+    UpdateSelectionExtent();
 }
 
 void EditorCore::MoveRight() {
@@ -81,26 +82,30 @@ void EditorCore::MoveRight() {
         ++cursor_.line;
         cursor_.col = 0;
     }
+    UpdateSelectionExtent();
 }
 
 void EditorCore::MoveUp() {
     if (cursor_.line > 0) --cursor_.line;
     ClampCursor();
+    UpdateSelectionExtent();
 }
 
 void EditorCore::MoveDown() {
     if (cursor_.line + 1 < lines_.size()) ++cursor_.line;
     ClampCursor();
+    UpdateSelectionExtent();
 }
 
-void EditorCore::MoveLineStart() { cursor_.col = 0; }
-void EditorCore::MoveLineEnd()   { cursor_.col = lines_[cursor_.line].size(); }
+void EditorCore::MoveLineStart() { cursor_.col = 0; UpdateSelectionExtent(); }
+void EditorCore::MoveLineEnd()   { cursor_.col = lines_[cursor_.line].size(); UpdateSelectionExtent(); }
 
-void EditorCore::MoveFileStart() { cursor_ = Cursor{}; }
+void EditorCore::MoveFileStart() { cursor_ = Cursor{}; UpdateSelectionExtent(); }
 
 void EditorCore::MoveFileEnd() {
     cursor_.line = lines_.size() - 1;
     cursor_.col  = lines_[cursor_.line].size();
+    UpdateSelectionExtent();
 }
 
 void EditorCore::MovePage(int direction, size_t pageLines) {
@@ -111,12 +116,14 @@ void EditorCore::MovePage(int direction, size_t pageLines) {
         cursor_.line += pageLines;
     }
     ClampCursor();
+    UpdateSelectionExtent();
 }
 
 void EditorCore::GotoLine(size_t oneBasedLine) {
     cursor_.line = (oneBasedLine == 0) ? 0 : oneBasedLine - 1;
     cursor_.col  = 0;
     ClampCursor();
+    UpdateSelectionExtent();
 }
 
 // --- editing ---------------------------------------------------------------
@@ -248,6 +255,150 @@ bool EditorCore::FindPrevious(std::wstring* messageOut) {
     }
     if (messageOut) *messageOut = L"Předchozí výskyt nebyl nalezen.";
     return false;
+}
+
+// --- block selection ---------------------------------------------------------
+
+void EditorCore::UpdateSelectionExtent() {
+    if (selection_.mode != BlockMode::None && !selection_.locked) {
+        selection_.end = cursor_;
+    }
+}
+
+void EditorCore::BlockMarkStart(BlockMode mode) {
+    selection_.mode   = mode;
+    selection_.anchor = cursor_;
+    selection_.end    = cursor_;
+    selection_.locked = false;
+}
+
+void EditorCore::BlockMarkEnd() {
+    if (selection_.mode == BlockMode::None) return;
+    selection_.locked = true;
+}
+
+void EditorCore::BlockCancel() {
+    selection_ = Selection{};
+}
+
+std::pair<Cursor, Cursor> EditorCore::NormalizedSelection() const {
+    Cursor lo = selection_.anchor;
+    Cursor hi = selection_.end;
+    if (lo.line > hi.line || (lo.line == hi.line && lo.col > hi.col)) std::swap(lo, hi);
+    return {lo, hi};
+}
+
+std::vector<std::wstring> EditorCore::ExtractBlock() const {
+    std::vector<std::wstring> block;
+    const auto [lo, hi] = NormalizedSelection();
+    if (selection_.mode == BlockMode::Line) {
+        for (size_t line = lo.line; line <= hi.line && line < lines_.size(); ++line) {
+            block.push_back(lines_[line]);
+        }
+    } else if (selection_.mode == BlockMode::Column) {
+        const size_t colLo = (std::min)(lo.col, hi.col);
+        const size_t colHi = (std::max)(lo.col, hi.col);
+        for (size_t line = lo.line; line <= hi.line && line < lines_.size(); ++line) {
+            const std::wstring& text = lines_[line];
+            if (text.size() <= colLo) {
+                block.emplace_back();
+            } else {
+                block.push_back(text.substr(colLo, colHi - colLo));
+            }
+        }
+    }
+    return block;
+}
+
+void EditorCore::EraseBlock() {
+    const auto [lo, hi] = NormalizedSelection();
+    if (selection_.mode == BlockMode::Line) {
+        const size_t first = lo.line;
+        const size_t last  = (std::min)(hi.line, lines_.size() - 1);
+        lines_.erase(lines_.begin() + static_cast<long>(first),
+                     lines_.begin() + static_cast<long>(last) + 1);
+        if (lines_.empty()) lines_.emplace_back();
+        cursor_.line = (first < lines_.size()) ? first : lines_.size() - 1;
+        cursor_.col  = 0;
+    } else if (selection_.mode == BlockMode::Column) {
+        const size_t colLo = (std::min)(lo.col, hi.col);
+        const size_t colHi = (std::max)(lo.col, hi.col);
+        for (size_t line = lo.line; line <= hi.line && line < lines_.size(); ++line) {
+            std::wstring& text = lines_[line];
+            if (text.size() <= colLo) continue;
+            text.erase(colLo, colHi - colLo);
+        }
+        cursor_.line = lo.line;
+        cursor_.col  = colLo;
+    }
+    ClampCursor();
+    modified_ = true;
+}
+
+bool EditorCore::BlockCopy(std::wstring* messageOut) {
+    if (selection_.mode == BlockMode::None) {
+        if (messageOut) *messageOut = L"Není označen žádný blok.";
+        return false;
+    }
+    const std::vector<std::wstring> block = ExtractBlock();
+    if (selection_.mode == BlockMode::Line) {
+        lines_.insert(lines_.begin() + static_cast<long>(cursor_.line), block.begin(), block.end());
+        cursor_.line += block.size();
+        cursor_.col   = 0;
+    } else {
+        for (size_t i = 0; i < block.size(); ++i) {
+            const size_t targetLine = cursor_.line + i;
+            while (targetLine >= lines_.size()) lines_.emplace_back();
+            std::wstring& text = lines_[targetLine];
+            if (text.size() < cursor_.col) text.resize(cursor_.col, L' ');
+            text.insert(cursor_.col, block[i]);
+        }
+    }
+    ClampCursor();
+    modified_ = true;
+    if (messageOut) *messageOut = L"Blok zkopírován.";
+    return true;
+}
+
+bool EditorCore::BlockMove(std::wstring* messageOut) {
+    if (selection_.mode == BlockMode::None) {
+        if (messageOut) *messageOut = L"Není označen žádný blok.";
+        return false;
+    }
+    const Cursor target = cursor_;
+    const std::vector<std::wstring> block = ExtractBlock();
+    EraseBlock();
+    cursor_ = target;
+    ClampCursor();
+    if (selection_.mode == BlockMode::Line) {
+        lines_.insert(lines_.begin() + static_cast<long>(cursor_.line), block.begin(), block.end());
+        cursor_.line += block.size();
+        cursor_.col   = 0;
+    } else {
+        for (size_t i = 0; i < block.size(); ++i) {
+            const size_t targetLine = cursor_.line + i;
+            while (targetLine >= lines_.size()) lines_.emplace_back();
+            std::wstring& text = lines_[targetLine];
+            if (text.size() < cursor_.col) text.resize(cursor_.col, L' ');
+            text.insert(cursor_.col, block[i]);
+        }
+    }
+    ClampCursor();
+    modified_ = true;
+    BlockCancel();
+    if (messageOut) *messageOut = L"Blok přesunut.";
+    return true;
+}
+
+bool EditorCore::BlockDelete(std::wstring* messageOut) {
+    if (selection_.mode == BlockMode::None) {
+        if (messageOut) *messageOut = L"Není označen žádný blok.";
+        return false;
+    }
+    EraseBlock();
+    BlockCancel();
+    if (messageOut) *messageOut = L"Blok vymazán.";
+    return true;
 }
 
 // --- viewport --------------------------------------------------------------
