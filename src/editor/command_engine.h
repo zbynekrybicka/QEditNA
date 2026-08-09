@@ -12,9 +12,11 @@
 namespace qed {
 
 class EditorCore;
+class MacroEngine;
 
 struct CommandContext {
     EditorCore*  editor       = nullptr;
+    MacroEngine* macros       = nullptr;   // needed by macro.new/delete/save/load
     size_t       visibleLines = 1;   // current viewport height, for page moves
     size_t       visibleCols  = 1;
     std::wstring argument;           // optional textual argument (e.g. goto line)

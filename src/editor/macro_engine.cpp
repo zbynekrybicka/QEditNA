@@ -43,8 +43,10 @@ std::string WideToUtf8(const std::wstring& text) {
     return out;
 }
 
-// One step per line: "command\targument". A line with no tab has an empty
-// argument. Sections start with "[hotkeyId]".
+// One step per line: "command\targument". Written with a tab, but parsed
+// leniently — a hand-edited .mac file can use a tab or one-or-more spaces,
+// since the two are visually indistinguishable in most editors. A line with
+// no separator has an empty argument. Sections start with "[hotkeyId]".
 std::wstring SerializeMacros(const std::map<std::wstring, Macro>& macros) {
     std::wstring out = kMacFileHeader;
     out += L"\r\n";
@@ -79,20 +81,26 @@ bool ParseMacros(const std::wstring& text, std::map<std::wstring, Macro>* outMac
     for (size_t i = 1; i < lines.size(); ++i) {
         const std::wstring& line = lines[i];
         if (line.empty()) continue;
-        if (line.front() == L'[' && line.back() == L']') {
-            currentId = line.substr(1, line.size() - 2);
+        // Trailing tabs/spaces after "]" (e.g. from an editor's auto-alignment)
+        // must not stop this from being recognised as a section header.
+        const size_t headerEnd = line.find_last_not_of(L"\t ");
+        if (line.front() == L'[' && headerEnd != std::wstring::npos &&
+            line[headerEnd] == L']') {
+            currentId = line.substr(1, headerEnd - 1);
             macros[currentId];   // ensure the section exists even with zero steps
             haveSection = true;
             continue;
         }
         if (!haveSection) continue;   // stray line before any section header
-        const size_t tab = line.find(L'\t');
+        const size_t sep = line.find_first_of(L"\t ");
         MacroStep step;
-        if (tab == std::wstring::npos) {
+        if (sep == std::wstring::npos) {
             step.command = line;
         } else {
-            step.command  = line.substr(0, tab);
-            step.argument = line.substr(tab + 1);
+            step.command = line.substr(0, sep);
+            const size_t argStart = line.find_first_not_of(L"\t ", sep);
+            step.argument = argStart == std::wstring::npos ? std::wstring()
+                                                            : line.substr(argStart);
         }
         macros[currentId].push_back(step);
     }
@@ -204,7 +212,10 @@ bool MacroEngine::LoadFromFile(const std::wstring& path, std::wstring* errorOut)
         return false;
     }
 
-    for (auto& entry : parsed) macros_[entry.first] = std::move(entry.second);
+    for (auto& entry : parsed) {
+        if (IsReservedHotkeyId(entry.first)) continue;   // e.g. a hand-edited [F5] section
+        macros_[entry.first] = std::move(entry.second);
+    }
     return true;
 }
 
@@ -215,6 +226,7 @@ bool ResolveMacroHotkey(unsigned key, bool ctrl, bool alt,
     if (!ctrl && !alt) {
         if (key >= VK_F2 && key <= VK_F12) {
             const std::wstring label = L"F" + std::to_wstring(key - VK_F1 + 1);
+            if (IsReservedHotkeyId(label)) return false;
             if (idOut) *idOut = label;
             if (labelOut) *labelOut = label;
             return true;
@@ -227,12 +239,19 @@ bool ResolveMacroHotkey(unsigned key, bool ctrl, bool alt,
     if (!isLetter && !isDigit) return false;
 
     const wchar_t letter = static_cast<wchar_t>(key);
-    if (ctrl && (letter == L'S' || letter == L'Y')) return false;   // already bound
-
     const std::wstring id = (ctrl ? L"Ctrl+" : L"Alt+") + std::wstring(1, letter);
+    if (IsReservedHotkeyId(id)) return false;
     if (idOut) *idOut = id;
     if (labelOut) *labelOut = id;
     return true;
+}
+
+bool IsReservedHotkeyId(const std::wstring& id) {
+    static const wchar_t* const kReserved[] = {L"F1", L"F5", L"F6", L"Ctrl+S", L"Ctrl+Y"};
+    for (const wchar_t* reserved : kReserved) {
+        if (id == reserved) return true;
+    }
+    return false;
 }
 
 } // namespace qed

@@ -71,25 +71,36 @@ write-protect flag (test builds) or fails for another reason (see `io::SaveResul
 
 ## Macros
 
-Reachable only through the F1 menu's **Makra** submenu — see
+Reachable through the F1 menu's **Makra** submenu; `macro.new` and `macro.stop-recording`
+are additionally hardcoded to F5/F6 (see [KEYBINDINGS.md](KEYBINDINGS.md#editing)). See
 [MACROS.md](MACROS.md) for recording/playback semantics and
 [KEYBINDINGS.md](KEYBINDINGS.md#macros) for the hotkey shapes.
 
-| Command                 | Effect |
-|---------------------------|--------|
-| `macro.new`                | Prompts for a hotkey, then starts recording onto it. |
-| `macro.stop-recording`     | Stops the current recording. Menu entry is disabled when nothing is recording. |
-| `macro.delete`             | Prompts for a hotkey and deletes its macro. |
-| `macro.save`                | Prompts for a `.mac` filename and writes all in-memory macros to it (subject to the write-protect flag). |
-| `macro.load`                | Prompts for a `.mac` filename and loads macros from it (always allowed — read, not write). |
+| Command                 | Argument | Effect |
+|---------------------------|----------|--------|
+| `macro.new`                | hotkey id | Starts recording onto that hotkey (overwrites any existing macro there — no confirmation prompt at this level). Fails if the id is reserved (F1, F5, F6, Ctrl+S, Ctrl+Y — see `IsReservedHotkeyId`). |
+| `macro.stop-recording`     | — | Stops the current recording. Fails with a status message if nothing is recording. |
+| `macro.delete`             | hotkey id | Deletes the macro on that hotkey, if any. |
+| `macro.save`                | file path | Writes all in-memory macros to that path exactly as given (no automatic `.mac` extension at this level). Subject to the write-protect flag. |
+| `macro.load`                | file path | Loads macros from that path (always allowed — read, not write). |
 
-Unlike every other command on this page, these five are **not** registered in
-`CommandEngine` — they don't operate on `EditorCore` at all, only on `WindowState`-level UI
-flow (hotkey capture, filename prompts), so they're special-cased entirely inside
-`OnKeyDown`'s F1-menu handling in `src/ui/window.cpp`, the same way `find.search` special-
-cases opening the search input box. `CommandEngine` only ever sees the commands actually
-*recorded into* a macro (any `cursor.*`/`edit.*`/`file.*`/`find.*` command, plus the
-synthetic `macro.play` step used for nested macro playback — see MACROS.md).
+All five **are** registered in `CommandEngine` — see `CommandContext::macros` in
+`command_engine.h` and their handlers in `command_engine.cpp`. This is what lets a macro
+step call them directly, typically (for the four that take an argument) via a
+`<TEXT>`/`<SHORTKEY>` placeholder that pauses playback to ask the user for the value on
+that one invocation — see [MACROS.md](MACROS.md#placeholder-arguments). `macro.stop-
+recording` takes no argument, so a macro step just names it plain, e.g. a step
+`macro.stop-recording	` bound to its own hotkey ends whatever recording is in progress.
+
+The F1 menu still reaches all five through its own multi-step UI flow (hotkey capture,
+filename prompt, and for stop-recording a direct `MacroEngine::StopRecording()` call) in
+`OnKeyDown`'s F1-menu handling in `src/ui/window.cpp`, bypassing `CommandEngine` entirely
+for the same reason as before — the four that need an argument have to *collect* it
+interactively before they have one, which `CommandEngine::Execute` doesn't support, and
+`macro.stop-recording`'s menu entry additionally needs the disabled/dimmed state
+(`CommandMenu::SetEnabled`) that only the menu tracks. That interactive path also keeps
+the overwrite confirmation and automatic `.mac` extension that the raw commands above
+don't have.
 
 ## Command menu
 

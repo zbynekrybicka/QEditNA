@@ -30,6 +30,8 @@ configurable keymap yet.
 | Delete       | `edit.delete-forward`    |
 | Ctrl+Y       | `edit.delete-line`       |
 | Ctrl+S       | `file.save`              |
+| F5           | `macro.new` (opens the same hotkey-capture prompt as the F1 menu's "Nové makro") |
+| F6           | `macro.stop-recording`   |
 | Esc          | clear the status-bar message (not a registered command) |
 | any printable character | inserted directly at the cursor |
 
@@ -62,8 +64,14 @@ is closed. See [command_menu.h](../src/ui/command_menu.h).
 
 ## Macros
 
-F2–F12, Ctrl+&lt;letter/digit&gt; (except Ctrl+S, Ctrl+Y — already bound above), and
-Alt+&lt;letter/digit&gt; are reserved for macro hotkeys. See
+F2–F12, Ctrl+&lt;letter/digit&gt;, and Alt+&lt;letter/digit&gt; are reserved for macro
+hotkeys, **except** F1, F5, F6, Ctrl+S, and Ctrl+Y, which are hardcoded to a fixed action
+elsewhere (menu, `macro.new`, `macro.stop-recording`, `file.save`, `edit.delete-line`
+respectively) and can never hold a macro — `ResolveMacroHotkey`/`IsReservedHotkeyId` in
+`macro_engine.h/cpp` are the single source of truth for this exclusion list, checked both
+when capturing a hotkey interactively (F1 menu, `<SHORTKEY>` placeholder) and when loading
+a `.mac` file, so a hand-edited file that names one of these ids as a section (e.g.
+`[F5]`) is silently skipped on load rather than shadowing the hardcoded key. See
 [MACROS.md](MACROS.md) for the recording/playback model and the F1 → **Makra** submenu
 (Nové makro, Ukončit nahrávání, Smazat makro, Uložit makra, Načíst makra) that manages
 them. Pressing a hotkey with a macro bound to it plays that macro back; pressing one with

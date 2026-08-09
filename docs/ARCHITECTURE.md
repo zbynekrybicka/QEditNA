@@ -182,17 +182,35 @@ just `{command, argument}` — the same shape `CommandContext` already uses), an
   which appends to the in-progress buffer if `MacroEngine::IsRecording()`. This is the
   "intercept resolved commands, not raw keys" hook `MACROS.md` called for before this was
   implemented.
-- **Playback**: `RunMacro(hotkeyId)` looks up the macro and replays each step through the
-  same low-level `DispatchCommand()` that `Run`/`RunFind` use internally — bypassing the
-  recording hook, so played-back steps aren't re-recorded into whatever might currently be
-  recording. If a step's command is the synthetic `macro.play` (a macro invoked from
-  inside another macro), `RunMacro` recurses instead of forwarding it to `CommandEngine`,
-  which has no such command.
+- **Playback**: `RunMacro(hotkeyId)` looks up the macro, pushes it onto `WindowState`'s
+  `playbackStack` (a `std::vector<PlaybackFrame>`, frame = macro + next-step index), and
+  calls `ContinuePlayback()`, which loops popping/advancing frames and dispatching each
+  step through the same low-level `DispatchCommand()` that `Run`/`RunFind` use internally
+  — bypassing the recording hook, so played-back steps aren't re-recorded into whatever
+  might currently be recording. If a step's command is the synthetic `macro.play` (a macro
+  invoked from inside another macro), a new frame is pushed instead of forwarding it to
+  `CommandEngine`, which has no such command. If a step's *argument* is the placeholder
+  `<TEXT>` or `<SHORTKEY>`, `ContinuePlayback()` opens the matching prompt and returns
+  early instead of dispatching — `OnChar`/`OnKeyDown` resume it once the user answers (see
+  `PlaybackWait` and [MACROS.md](MACROS.md#placeholder-arguments)). The stack (rather than
+  the plain recursive loop this used before placeholders existed) is what lets playback
+  suspend across an arbitrary number of window messages and resume at the right step,
+  including inside a nested `macro.play`.
 - **Hotkey shape**: `ResolveMacroHotkey(key, ctrl, alt, &id, &label)` in
   `macro_engine.h/cpp` is the sole authority on what counts as a valid macro hotkey
-  (F2–F12, Ctrl+&lt;letter/digit&gt;, Alt+&lt;letter/digit&gt;, excluding Ctrl+S/Ctrl+Y
-  which are already bound). Both hotkey-capture UI flows and the playback dispatcher in
+  (F2–F12, Ctrl+&lt;letter/digit&gt;, Alt+&lt;letter/digit&gt;, excluding whatever
+  `IsReservedHotkeyId` names). Both hotkey-capture UI flows and the playback dispatcher in
   `window.cpp` call it, so the definition lives in exactly one place.
+- **Reserved ids**: `IsReservedHotkeyId(id)` (`macro_engine.h/cpp`) lists the hotkey ids
+  that are hardcoded to a fixed action and can never hold a macro — F1 (menu toggle,
+  excluded implicitly by `ResolveMacroHotkey`'s F2–F12 range), F5 (`macro.new`), F6
+  (`macro.stop-recording`), Ctrl+S (`file.save`), Ctrl+Y (`edit.delete-line`). Three call
+  sites enforce it: `ResolveMacroHotkey` (so no raw keystroke ever resolves to a reserved
+  id), `MacroEngine::LoadFromFile` (so a hand-edited `.mac` file can't sneak one in by
+  naming the section directly, e.g. `[F5]` — such sections are silently dropped on load),
+  and `macro.new`'s `CommandEngine` handler (so a literal, non-`<SHORTKEY>` argument can't
+  either). `OnKeyDown` in `window.cpp` wires F5/F6 directly to `BeginMacroNew`/`Run(...,
+  L"macro.stop-recording")`, alongside the pre-existing Ctrl+S/Ctrl+Y/F1 cases.
 - **UI flow**: the four commands that need more than a single keypress (`macro.new`,
   `macro.delete`, `macro.save`, `macro.load`) are driven by a `MacroFlow` enum on
   `WindowState` (`window.cpp`), each state consuming keys until it resolves:
@@ -202,7 +220,19 @@ just `{command, argument}` — the same shape `CommandContext` already uses), an
   the existing `InputBox` text-entry overlay for a `.mac` filename (`EnsureMacExtension`
   appends `.mac` if the user didn't type it). Prompts during hotkey-capture states reuse
   `NoticeBox` purely for its `Show`/`Draw`, without its auto-dismiss-on-any-key behaviour —
-  `window.cpp` drives `Show`/`Dismiss` explicitly instead.
+  `window.cpp` drives `Show`/`Dismiss` explicitly instead. `kAwaitOverwriteConfirm`'s Enter
+  branch sets `WindowState::macroFlowJustClosed` before resetting `macroFlow` to `kNone`
+  (mirroring `noticeJustDismissed`, see the notice-overlay note above) — otherwise
+  `TranslateMessage`'s follow-up `WM_CHAR('\r')` would insert a newline into the buffer
+  and, since recording already started by the time that `WM_CHAR` arrives, get recorded
+  into the very macro Enter just confirmed overwriting; `OnChar` consumes and clears the
+  flag before any other handling. Separately, all five macro-
+  management commands (these four plus `macro.stop-recording`) are also registered as
+  ordinary `CommandEngine` commands — the four above take the hotkey id/filename as
+  `context.argument`, `macro.stop-recording` takes none — via a `CommandContext::macros`
+  pointer. That path is what playback uses (typically with a `<TEXT>`/`<SHORTKEY>`
+  placeholder standing in for the argument), and it's independent of the interactive
+  `MacroFlow` above, which the F1 menu still uses exclusively.
 - **Alt+key routing**: Windows delivers Alt-held keystrokes as `WM_SYSKEYDOWN`, not
   `WM_KEYDOWN`. `WindowProc` forwards `WM_SYSKEYDOWN` to the same `OnKeyDown` (except a
   bare Alt or F10 press, left to `DefWindowProcW`), so Alt+&lt;letter&gt; macro hotkeys

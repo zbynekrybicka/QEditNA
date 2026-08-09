@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <string>
+#include <vector>
 #include <windowsx.h>
 
 namespace qed {
@@ -30,6 +31,23 @@ enum class MacroFlow {
     kAwaitLoadName,         // "Načíst makra": waiting for a filename (via macroFileInput)
 };
 
+// One frame of in-progress macro playback: the macro being played and the
+// index of its next step. A stack (rather than recursion) is needed because
+// a <TEXT>/<SHORTKEY> placeholder suspends playback across window messages
+// (waiting for the user to type/press something) and must resume exactly
+// where it left off, including inside nested macro.play calls.
+struct PlaybackFrame {
+    const Macro* macro;
+    size_t       index = 0;
+};
+
+// What playback is currently waiting on, having hit a placeholder argument.
+enum class PlaybackWait {
+    kNone,
+    kText,      // <TEXT>: playbackInput is open, waiting for Enter
+    kShortkey,  // <SHORTKEY>: macroPrompt is shown, waiting for a hotkey-shaped key
+};
+
 // Everything the window needs, stored once and reached via GWLP_USERDATA.
 struct WindowState {
     EditorCore    editor;
@@ -42,9 +60,15 @@ struct WindowState {
     NoticeBox     macroPrompt;
     bool          noticeJustDismissed = false;
     bool          menuJustClosed = false;
+    bool          macroFlowJustClosed = false;   // swallow the WM_CHAR('\r') that follows the
+                                                  // Enter which confirmed a macro overwrite
     MacroFlow     macroFlow = MacroFlow::kNone;
     std::wstring  macroPendingId;
     std::wstring  macroPendingLabel;
+    std::vector<PlaybackFrame> playbackStack;
+    PlaybackWait  playbackWait = PlaybackWait::kNone;
+    std::wstring  playbackPendingCommand;   // command awaiting its <TEXT>/<SHORTKEY> argument
+    InputBox      playbackInput;            // used for <TEXT> placeholders
     HFONT         font        = nullptr;
     int           charWidth   = 8;
     int           lineHeight  = 16;
@@ -124,6 +148,7 @@ bool DispatchCommand(WindowState* state, const std::wstring& command,
                      const std::wstring& argument, std::wstring* messageOut) {
     CommandContext context;
     context.editor       = &state->editor;
+    context.macros       = &state->macros;
     context.visibleLines = state->visibleLines;
     context.visibleCols  = state->visibleCols;
     context.argument     = argument;
@@ -165,6 +190,61 @@ void RunFind(HWND window, WindowState* state, const wchar_t* command,
     Refresh(window, state);
 }
 
+// Abandons all in-progress playback (top-level macro and any nested
+// macro.play frames), e.g. when the user presses Esc at a <TEXT>/<SHORTKEY>
+// prompt.
+void AbortPlayback(WindowState* state) {
+    state->playbackStack.clear();
+    state->playbackWait = PlaybackWait::kNone;
+    state->playbackPendingCommand.clear();
+    state->playbackInput.Cancel();
+    state->macroPrompt.Dismiss();
+}
+
+// Drives macro playback until either the stack empties or a step's argument
+// is a placeholder (<TEXT>/<SHORTKEY>), in which case it opens the matching
+// prompt and returns — playback resumes from OnChar/OnKeyDown once the user
+// answers it (see the playbackWait handling there).
+void ContinuePlayback(HWND window, WindowState* state) {
+    while (!state->playbackStack.empty()) {
+        PlaybackFrame& frame = state->playbackStack.back();
+        if (frame.index >= frame.macro->size()) {
+            state->playbackStack.pop_back();
+            continue;
+        }
+        const MacroStep step = (*frame.macro)[frame.index];
+        ++frame.index;
+
+        if (step.command == L"macro.play") {
+            const Macro* nested = state->macros.GetMacro(step.argument);
+            if (nested) state->playbackStack.push_back(PlaybackFrame{nested, 0});
+            continue;   // not re-recorded — matches the pre-existing nested-playback rule
+        }
+
+        if (step.argument == L"<TEXT>") {
+            state->playbackPendingCommand = step.command;
+            state->playbackWait = PlaybackWait::kText;
+            state->playbackInput.Open(L"Doplňte text pro " + step.command + L": ");
+            InvalidateRect(window, nullptr, FALSE);
+            return;
+        }
+        if (step.argument == L"<SHORTKEY>") {
+            state->playbackPendingCommand = step.command;
+            state->playbackWait = PlaybackWait::kShortkey;
+            state->macroPrompt.Show(L"Stiskněte klávesovou zkratku pro " + step.command +
+                                    L" — Esc = přerušit makro.");
+            InvalidateRect(window, nullptr, FALSE);
+            return;
+        }
+
+        std::wstring message;
+        const bool ok = DispatchCommand(state, step.command, step.argument, &message);
+        state->statusMessage = message;
+        if (!ok && !message.empty()) state->notice.Show(message);
+    }
+    Refresh(window, state);
+}
+
 // Plays back the macro bound to `hotkeyId`. If a recording is in progress,
 // this call is captured as a single "macro.play" step (nested macro
 // invocation) rather than inlining the played macro's own steps.
@@ -174,17 +254,8 @@ void RunMacro(HWND window, WindowState* state, const std::wstring& hotkeyId) {
 
     RecordIfNeeded(state, L"macro.play", hotkeyId);
 
-    for (const auto& step : *macro) {
-        if (step.command == L"macro.play") {
-            RunMacro(window, state, step.argument);   // nested playback, not re-recorded
-            continue;
-        }
-        std::wstring message;
-        const bool ok = DispatchCommand(state, step.command, step.argument, &message);
-        state->statusMessage = message;
-        if (!ok && !message.empty()) state->notice.Show(message);
-    }
-    Refresh(window, state);
+    state->playbackStack.push_back(PlaybackFrame{macro, 0});
+    ContinuePlayback(window, state);
 }
 
 // Ensures a user-typed filename has the .mac extension (case-insensitively).
@@ -260,6 +331,13 @@ bool HandleMacroFlowKey(HWND window, WindowState* state, WPARAM key) {
                 state->statusMessage = L"Nahrávání makra (" + state->macroPendingLabel +
                                        L") spuštěno — přepisuje předchozí.";
                 CancelMacroFlow(window, state, /*clearStatus=*/false);
+                // Enter's WM_KEYDOWN is consumed here, but Windows still
+                // sends a follow-up WM_CHAR('\r') — without this, it would
+                // fall through to edit.newline and get recorded into the
+                // macro that just started (macroFlow is already kNone by
+                // then, so the swallow-while-flow-active check below misses
+                // it, same reasoning as menuJustClosed/noticeJustDismissed).
+                state->macroFlowJustClosed = true;
             } else if (key == VK_ESCAPE) {
                 CancelMacroFlow(window, state);
             }
@@ -333,6 +411,7 @@ void OnPaint(HWND window, WindowState* state) {
     state->menu.Draw(memDc, client, state->font, state->lineHeight);
     state->searchInput.Draw(memDc, client, state->font, state->lineHeight);
     state->macroFileInput.Draw(memDc, client, state->font, state->lineHeight);
+    state->playbackInput.Draw(memDc, client, state->font, state->lineHeight);
     state->macroPrompt.Draw(memDc, client, state->font, state->lineHeight);
     state->notice.Draw(memDc, client, state->font, state->lineHeight);
 
@@ -347,6 +426,42 @@ void OnPaint(HWND window, WindowState* state) {
 }
 
 bool OnKeyDown(HWND window, WindowState* state, WPARAM key) {
+    // Playback is suspended at a <TEXT>/<SHORTKEY> placeholder — this takes
+    // priority over every other key handling below (mutually exclusive with
+    // macroFlow: playback never overlaps the F1-menu macro-management flow).
+    if (state->playbackWait == PlaybackWait::kShortkey) {
+        if (key == VK_ESCAPE) {
+            AbortPlayback(state);
+            state->statusMessage = L"Makro přerušeno.";
+            Refresh(window, state);
+            return true;
+        }
+        const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool alt  = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        std::wstring id, label;
+        if (!ResolveMacroHotkey(static_cast<unsigned>(key), ctrl, alt, &id, &label)) {
+            return true;   // not a valid hotkey shape — keep waiting
+        }
+        const std::wstring command = state->playbackPendingCommand;
+        state->playbackWait = PlaybackWait::kNone;
+        state->playbackPendingCommand.clear();
+        state->macroPrompt.Dismiss();
+        std::wstring message;
+        const bool ok = DispatchCommand(state, command, id, &message);
+        state->statusMessage = message;
+        if (!ok && !message.empty()) state->notice.Show(message);
+        ContinuePlayback(window, state);
+        return true;
+    }
+    if (state->playbackWait == PlaybackWait::kText) {
+        if (key == VK_ESCAPE) {
+            AbortPlayback(state);
+            state->statusMessage = L"Makro přerušeno.";
+            Refresh(window, state);
+        }
+        return true;   // other keys are handled as text input in OnChar
+    }
+
     if (state->macroFlow != MacroFlow::kNone) {
         return HandleMacroFlowKey(window, state, key);
     }
@@ -438,6 +553,8 @@ bool OnKeyDown(HWND window, WindowState* state, WPARAM key) {
         case VK_PRIOR:  Run(window, state, L"cursor.page-up");    return true;
         case VK_NEXT:   Run(window, state, L"cursor.page-down");  return true;
         case VK_DELETE: Run(window, state, L"edit.delete-forward"); return true;
+        case VK_F5:     BeginMacroNew(window, state);              return true;
+        case VK_F6:     Run(window, state, L"macro.stop-recording"); return true;
         case 'Y':
             if (ctrl) { Run(window, state, L"edit.delete-line"); return true; }
             return false;
@@ -454,8 +571,33 @@ bool OnKeyDown(HWND window, WindowState* state, WPARAM key) {
 }
 
 bool OnChar(HWND window, WindowState* state, WPARAM ch) {
+    if (state->playbackWait == PlaybackWait::kText) {
+        const InputAction action = state->playbackInput.HandleChar(static_cast<wchar_t>(ch));
+        if (action == InputAction::kConfirmed) {
+            const std::wstring argument = state->playbackInput.Text();
+            const std::wstring command  = state->playbackPendingCommand;
+            state->playbackInput.Cancel();
+            state->playbackWait = PlaybackWait::kNone;
+            state->playbackPendingCommand.clear();
+            std::wstring message;
+            const bool ok = DispatchCommand(state, command, argument, &message);
+            state->statusMessage = message;
+            if (!ok && !message.empty()) state->notice.Show(message);
+            ContinuePlayback(window, state);
+        } else {
+            InvalidateRect(window, nullptr, FALSE);
+        }
+        return true;
+    }
+    if (state->playbackWait == PlaybackWait::kShortkey) return true;   // handled in OnKeyDown
+
     if (state->menuJustClosed) {
         state->menuJustClosed = false;   // consume the char that closed the menu
+        return true;
+    }
+
+    if (state->macroFlowJustClosed) {
+        state->macroFlowJustClosed = false;   // consume the char that confirmed the overwrite
         return true;
     }
 

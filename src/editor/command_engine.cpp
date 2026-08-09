@@ -1,6 +1,7 @@
 #include "command_engine.h"
 
 #include "editor_core.h"
+#include "macro_engine.h"
 
 namespace qed {
 
@@ -117,6 +118,63 @@ void RegisterBuiltinCommands(CommandEngine& engine) {
         ctx.message = message;
         return ok;
     });
+
+    // Macro management as ordinary commands (argument = hotkey id or
+    // filename), so a macro step can drive them — typically via the
+    // <SHORTKEY>/<TEXT> placeholder that pauses playback to ask the user for
+    // the argument (see window.cpp's ContinuePlayback). The F1 menu still
+    // reaches these interactively through its own multi-step flow instead of
+    // through CommandEngine, since it needs to prompt before it has an
+    // argument at all.
+    engine.Register(L"macro.new", L"Start recording onto a hotkey (argument: hotkey id)",
+                    [](CommandContext& ctx) {
+                        if (!ctx.macros || ctx.argument.empty()) return false;
+                        if (IsReservedHotkeyId(ctx.argument)) {
+                            ctx.message = ctx.argument + L" je pevně přiřazená klávesa, makro na ni nelze uložit.";
+                            return false;
+                        }
+                        ctx.macros->StartRecording(ctx.argument);
+                        ctx.message = L"Nahrávání makra (" + ctx.argument + L") spuštěno.";
+                        return true;
+                    });
+    engine.Register(L"macro.stop-recording", L"Stop the current recording, if any",
+                    [](CommandContext& ctx) {
+                        if (!ctx.macros) return false;
+                        if (!ctx.macros->IsRecording()) {
+                            ctx.message = L"Žádné nahrávání neprobíhá.";
+                            return false;
+                        }
+                        ctx.macros->StopRecording();
+                        ctx.message = L"Nahrávání makra ukončeno.";
+                        return true;
+                    });
+    engine.Register(L"macro.delete", L"Delete the macro on a hotkey (argument: hotkey id)",
+                    [](CommandContext& ctx) {
+                        if (!ctx.macros || ctx.argument.empty()) return false;
+                        if (!ctx.macros->HasMacro(ctx.argument)) {
+                            ctx.message = L"Žádné makro pro " + ctx.argument + L".";
+                            return false;
+                        }
+                        ctx.macros->DeleteMacro(ctx.argument);
+                        ctx.message = L"Makro " + ctx.argument + L" smazáno.";
+                        return true;
+                    });
+    engine.Register(L"macro.save", L"Save all macros to a file (argument: path)",
+                    [](CommandContext& ctx) {
+                        if (!ctx.macros || ctx.argument.empty()) return false;
+                        std::wstring error;
+                        const bool ok = ctx.macros->SaveToFile(ctx.argument, &error);
+                        ctx.message = ok ? (L"Makra uložena do " + ctx.argument) : error;
+                        return ok;
+                    });
+    engine.Register(L"macro.load", L"Load macros from a file (argument: path)",
+                    [](CommandContext& ctx) {
+                        if (!ctx.macros || ctx.argument.empty()) return false;
+                        std::wstring error;
+                        const bool ok = ctx.macros->LoadFromFile(ctx.argument, &error);
+                        ctx.message = ok ? (L"Makra načtena ze souboru " + ctx.argument) : error;
+                        return ok;
+                    });
 }
 
 } // namespace qed

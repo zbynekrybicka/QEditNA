@@ -66,8 +66,17 @@ private:
 // label (currently identical to the id). Returns false when the combination
 // is outside the reserved F2-F12 / Ctrl+<letter-or-digit> / Alt+<letter-or-
 // digit> ranges, or collides with a key already bound elsewhere in the app
-// (Ctrl+S, Ctrl+Y).
+// (F5, F6, Ctrl+S, Ctrl+Y — see IsReservedHotkeyId).
 bool ResolveMacroHotkey(unsigned key, bool ctrl, bool alt,
                         std::wstring* idOut, std::wstring* labelOut);
+
+// True for hotkey ids that are hardcoded to a fixed action elsewhere in the
+// app (F5 = macro.new, F6 = macro.stop-recording, Ctrl+S = file.save,
+// Ctrl+Y = edit.delete-line) and can therefore never hold a macro. No raw
+// keystroke ever resolves to one of these ids via ResolveMacroHotkey, but a
+// hand-edited .mac file or a literal (non-<SHORTKEY>) macro.new/macro.delete
+// argument can still spell one out as text, so LoadFromFile and those two
+// commands check this directly instead of relying on ResolveMacroHotkey.
+bool IsReservedHotkeyId(const std::wstring& id);
 
 } // namespace qed
