@@ -41,6 +41,7 @@ struct WindowState {
     NoticeBox     notice;
     NoticeBox     macroPrompt;
     bool          noticeJustDismissed = false;
+    bool          menuJustClosed = false;
     MacroFlow     macroFlow = MacroFlow::kNone;
     std::wstring  macroPendingId;
     std::wstring  macroPendingLabel;
@@ -381,6 +382,10 @@ bool OnKeyDown(HWND window, WindowState* state, WPARAM key) {
     if (state->menu.IsActive()) {
         std::wstring command;
         if (state->menu.HandleKey(key, &command) == MenuAction::kExecute) {
+            // Enter both selects the menu item and generates a follow-up
+            // WM_CHAR('\r') — menuJustClosed tells OnChar to swallow it so
+            // it doesn't also insert a newline into the text.
+            state->menuJustClosed = true;
             if (command == L"find.search") {
                 state->searchInput.Open(L"Hledat: ");
                 InvalidateRect(window, nullptr, FALSE);
@@ -449,6 +454,11 @@ bool OnKeyDown(HWND window, WindowState* state, WPARAM key) {
 }
 
 bool OnChar(HWND window, WindowState* state, WPARAM ch) {
+    if (state->menuJustClosed) {
+        state->menuJustClosed = false;   // consume the char that closed the menu
+        return true;
+    }
+
     if (state->noticeJustDismissed) {
         state->noticeJustDismissed = false;   // consume the char that dismissed the notice
         return true;

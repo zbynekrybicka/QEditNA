@@ -108,7 +108,14 @@ MenuAction CommandMenu::HandleKey(WPARAM key, std::wstring* outCommand) {
             level.selected = (level.selected + 1) % count;
             return MenuAction::kNone;
 
-        case VK_RIGHT:
+        case VK_RIGHT: {
+            const MenuItem& item = (*level.items)[level.selected];
+            if (item.IsSubmenu()) {
+                stack_.push_back(Level{&item.children, 0});
+            }
+            return MenuAction::kNone;
+        }
+
         case VK_RETURN: {
             const MenuItem& item = (*level.items)[level.selected];
             if (item.IsSubmenu()) {
