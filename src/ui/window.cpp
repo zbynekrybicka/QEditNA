@@ -611,7 +611,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 
 } // namespace
 
-int RunEditor(HINSTANCE instance, int showCommand, const std::wstring& fileToOpen) {
+int RunEditor(HINSTANCE instance, int showCommand, const std::wstring& fileToOpen,
+             const std::wstring& macroToLoad) {
     WindowState state;
     RegisterBuiltinCommands(state.commands);
 
@@ -621,6 +622,17 @@ int RunEditor(HINSTANCE instance, int showCommand, const std::wstring& fileToOpe
             MessageBoxW(nullptr, (L"Cannot open file:\n" + error).c_str(),
                         QEDITNA_APP_NAME, MB_OK | MB_ICONERROR);
             return 1;
+        }
+    }
+
+    if (!macroToLoad.empty()) {
+        const std::wstring name = EnsureMacExtension(macroToLoad);
+        std::wstring error;
+        if (state.macros.LoadFromFile(name, &error)) {
+            state.statusMessage = L"Makra načtena ze souboru " + name;
+        } else {
+            MessageBoxW(nullptr, (error.empty() ? L"Operace s makry selhala." : error).c_str(),
+                        QEDITNA_APP_NAME, MB_OK | MB_ICONERROR);
         }
     }
 

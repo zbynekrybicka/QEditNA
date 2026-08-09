@@ -40,6 +40,17 @@ Playing a macro (pressing its bound hotkey) is itself recordable: if triggered w
 another macro is being recorded, it's captured as a single `macro.play` step referencing
 the played hotkey, not inlined — so nested/composed macros are supported.
 
+## Loading macros at startup (`-m`)
+
+`QEditNA.exe -m <filename>` loads a `.mac` file at startup, equivalent to running the
+"Načíst makra" menu command with that filename right after the window is created (see
+`RunEditor()` in `src/ui/window.cpp`). The `.mac` extension is appended automatically if
+missing, same as the interactive flow. Command-line parsing (`main.cpp`) recognizes `-m`
+anywhere in the argument list; the remaining argument (if any) is still treated as the file
+to open in the editor. On success the status bar shows the same "Makra načtena ze souboru
+…" message as the interactive load; on failure a message box reports the error and the
+editor still starts normally.
+
 ## Storage
 
 - **In memory**: `std::map<std::wstring hotkeyId, Macro>` inside `MacroEngine`, keyed by
