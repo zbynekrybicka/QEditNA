@@ -6,10 +6,11 @@ namespace qed {
 namespace ui {
 namespace {
 
-MenuItem Leaf(const wchar_t* label, const wchar_t* command) {
+MenuItem Leaf(const wchar_t* label, const wchar_t* command, bool enabled = true) {
     MenuItem item;
     item.label   = label;
     item.command = command;
+    item.enabled = enabled;
     return item;
 }
 
@@ -48,7 +49,24 @@ std::vector<MenuItem> BuildDefaultMenu() {
             Leaf(L"Next",      L"find.next"),
             Leaf(L"Previous",  L"find.previous"),
         }),
+        Submenu(L"Makra", {
+            Leaf(L"Nové makro",         L"macro.new"),
+            Leaf(L"Ukončit nahrávání",  L"macro.stop-recording", /*enabled=*/false),
+            Leaf(L"Smazat makro",       L"macro.delete"),
+            Leaf(L"Uložit makra",       L"macro.save"),
+            Leaf(L"Načíst makra",       L"macro.load"),
+        }),
     };
+}
+
+void SetEnabledRecursive(std::vector<MenuItem>& items, const std::wstring& command, bool enabled) {
+    for (auto& item : items) {
+        if (item.IsSubmenu()) {
+            SetEnabledRecursive(item.children, command, enabled);
+        } else if (item.command == command) {
+            item.enabled = enabled;
+        }
+    }
 }
 
 } // namespace
@@ -68,6 +86,10 @@ void CommandMenu::Toggle() {
 void CommandMenu::Close() {
     active_ = false;
     stack_.clear();
+}
+
+void CommandMenu::SetEnabled(const std::wstring& command, bool enabled) {
+    SetEnabledRecursive(root_, command, enabled);
 }
 
 MenuAction CommandMenu::HandleKey(WPARAM key, std::wstring* outCommand) {
@@ -93,6 +115,7 @@ MenuAction CommandMenu::HandleKey(WPARAM key, std::wstring* outCommand) {
                 stack_.push_back(Level{&item.children, 0});
                 return MenuAction::kNone;
             }
+            if (!item.enabled) return MenuAction::kNone;
             if (outCommand) *outCommand = item.command;
             Close();
             return MenuAction::kExecute;
@@ -156,7 +179,9 @@ void CommandMenu::Draw(HDC dc, const RECT& clientRect, HFONT font, int lineHeigh
             DeleteObject(highlight);
         }
 
-        SetTextColor(dc, selected ? RGB(255, 255, 255) : RGB(220, 220, 220));
+        const bool enabled = items[i].IsSubmenu() || items[i].enabled;
+        SetTextColor(dc, !enabled ? RGB(120, 120, 120)
+                                   : selected ? RGB(255, 255, 255) : RGB(220, 220, 220));
 
         RECT textRect = row;
         textRect.left += padX;

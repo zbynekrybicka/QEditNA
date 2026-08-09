@@ -68,6 +68,12 @@ void RegisterBuiltinCommands(CommandEngine& engine) {
         ctx.editor->InsertNewline();
         return true;
     });
+    engine.Register(L"edit.insert-char", L"Insert a character at the cursor (argument)",
+                    [](CommandContext& ctx) {
+                        if (ctx.argument.empty()) return false;
+                        ctx.editor->InsertChar(ctx.argument[0]);
+                        return true;
+                    });
     engine.Register(L"edit.delete-back", L"Delete character before cursor",
                     [](CommandContext& ctx) {
                         ctx.editor->DeleteBack();

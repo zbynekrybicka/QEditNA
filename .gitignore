@@ -3,5 +3,6 @@ build/
 *.d
 *.exe
 *.bak
+*.mac
 .vscode/
 txt/

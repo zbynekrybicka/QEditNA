@@ -34,11 +34,12 @@ or key (no `goto` command yet, despite `docs/` in CLAUDE.md's expected layout na
 | `edit.delete-back`      | Delete character before cursor      | Backspace       |
 | `edit.delete-forward`   | Delete character under cursor       | Delete          |
 | `edit.delete-line`      | Delete the current line             | Ctrl+Y          |
+| `edit.insert-char`      | Insert one character (`context.argument[0]`) at the cursor | any printable character |
 
-Printable characters are inserted directly via `EditorCore::InsertChar` from `WM_CHAR`,
-bypassing the command engine's named dispatch (there is no `edit.insert-char` command;
-insertion is high-frequency enough that it's handled as a direct call — see
-`OnChar` in `window.cpp`).
+Printable characters go through `edit.insert-char` from `WM_CHAR` (`OnChar` in
+`window.cpp`) rather than being handled as a hardcoded default like Enter/Backspace,
+specifically so macro recording — which taps `CommandEngine::Execute` — sees typed text
+and can play it back. See [MACROS.md](MACROS.md).
 
 ## File
 
@@ -68,17 +69,43 @@ this session.
 `file.save` returns `false` and sets a status message when the write is refused by the
 write-protect flag (test builds) or fails for another reason (see `io::SaveResult`).
 
+## Macros
+
+Reachable only through the F1 menu's **Makra** submenu — see
+[MACROS.md](MACROS.md) for recording/playback semantics and
+[KEYBINDINGS.md](KEYBINDINGS.md#macros) for the hotkey shapes.
+
+| Command                 | Effect |
+|---------------------------|--------|
+| `macro.new`                | Prompts for a hotkey, then starts recording onto it. |
+| `macro.stop-recording`     | Stops the current recording. Menu entry is disabled when nothing is recording. |
+| `macro.delete`             | Prompts for a hotkey and deletes its macro. |
+| `macro.save`                | Prompts for a `.mac` filename and writes all in-memory macros to it (subject to the write-protect flag). |
+| `macro.load`                | Prompts for a `.mac` filename and loads macros from it (always allowed — read, not write). |
+
+Unlike every other command on this page, these five are **not** registered in
+`CommandEngine` — they don't operate on `EditorCore` at all, only on `WindowState`-level UI
+flow (hotkey capture, filename prompts), so they're special-cased entirely inside
+`OnKeyDown`'s F1-menu handling in `src/ui/window.cpp`, the same way `find.search` special-
+cases opening the search input box. `CommandEngine` only ever sees the commands actually
+*recorded into* a macro (any `cursor.*`/`edit.*`/`file.*`/`find.*` command, plus the
+synthetic `macro.play` step used for nested macro playback — see MACROS.md).
+
 ## Command menu
 
 Besides the hardcoded key bindings above, every command is also reachable through the
 **F1 command menu** (`src/ui/command_menu.h/cpp`): a static tree of submenus (Cursor,
-Edit, File — mirroring the groups on this page) navigated with Up/Down/Left/Right and
-confirmed with Enter. See [KEYBINDINGS.md](KEYBINDINGS.md#command-menu) for the key
-mapping and [ARCHITECTURE.md](ARCHITECTURE.md) for how it plugs into `WindowProc`.
+Edit, File, Find, Makra — mirroring the groups on this page) navigated with
+Up/Down/Left/Right and confirmed with Enter. See [KEYBINDINGS.md](KEYBINDINGS.md#command-menu)
+for the key mapping and [ARCHITECTURE.md](ARCHITECTURE.md) for how it plugs into
+`WindowProc`.
 
 The menu is a fixed, hand-authored tree — it does not walk `CommandEngine::Names()`, so
 adding a command to `RegisterBuiltinCommands` does not automatically add it to the menu;
-`BuildDefaultMenu()` in `command_menu.cpp` needs a matching entry.
+`BuildDefaultMenu()` in `command_menu.cpp` needs a matching entry. Leaf items can also be
+individually disabled (`MenuItem::enabled`, toggled via `CommandMenu::SetEnabled`) — used
+for `macro.stop-recording`, which is dimmed and ignores Enter/Right while nothing is
+recording.
 
 ## Not yet implemented
 

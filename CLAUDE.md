@@ -130,8 +130,9 @@ QEditNA/
 - **Impact**: File read works, write silently fails (or logs warning, TBD)
 
 ### Macro Persistence
-- **Scope TBD**: Should macros persist across sessions? Store in `.qeditrc` or registry?
-- **For v0.x**: Likely in-memory only (lost on exit)
+- **Implemented**: in-memory during the session (`MacroEngine`, `src/editor/macro_engine.h/cpp`),
+  with explicit save/load to `.mac` files via the F1 → Makra menu (see `docs/MACROS.md`).
+  No auto-load/auto-save and no registry storage — the user opts in each time.
 
 ### Undo/Redo
 - **Scope TBD**: Is undo required for v0.x? Defer if not essential

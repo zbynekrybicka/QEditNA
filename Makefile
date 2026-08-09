@@ -25,6 +25,7 @@ TARGET    := $(BUILD_DIR)/QEditNA.exe
 SOURCES := src/main.cpp \
            src/editor/editor_core.cpp \
            src/editor/command_engine.cpp \
+           src/editor/macro_engine.cpp \
            src/io/file_io.cpp \
            src/ui/window.cpp \
            src/ui/status_bar.cpp \

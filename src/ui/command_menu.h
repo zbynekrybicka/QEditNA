@@ -13,6 +13,7 @@ struct MenuItem {
     std::wstring          label;
     std::wstring          command;    // non-empty for leaf items (executable commands)
     std::vector<MenuItem> children;   // non-empty for submenus
+    bool                  enabled = true;   // disabled leaves are shown dimmed and ignore Enter/Right
 
     bool IsSubmenu() const { return !children.empty(); }
 };
@@ -37,6 +38,11 @@ public:
 
     // Handles a key while the menu is active. Only call this when IsActive().
     MenuAction HandleKey(WPARAM key, std::wstring* outCommand);
+
+    // Enables/disables every leaf item bound to `command` (recursive tree
+    // walk). Call before opening the menu so its enabled state reflects
+    // current app state (e.g. "Ukončit nahrávání" only while recording).
+    void SetEnabled(const std::wstring& command, bool enabled);
 
     void Draw(HDC dc, const RECT& clientRect, HFONT font, int lineHeight) const;
 

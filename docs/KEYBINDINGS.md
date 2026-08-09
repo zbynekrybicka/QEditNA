@@ -60,8 +60,18 @@ While the menu is open it swallows all keyboard input (`OnKeyDown`/`OnChar` retu
 in `src/ui/window.cpp`) so editing keys and typed characters have no effect until the menu
 is closed. See [command_menu.h](../src/ui/command_menu.h).
 
-## Reserved but unimplemented
+## Macros
 
-CLAUDE.md reserves F2–F12 and Ctrl+\* / Alt+\* for the macro engine. No macro engine
-exists yet, so none of those keys are currently bound to anything; unhandled keys fall
-through to `DefWindowProcW`.
+F2–F12, Ctrl+&lt;letter/digit&gt; (except Ctrl+S, Ctrl+Y — already bound above), and
+Alt+&lt;letter/digit&gt; are reserved for macro hotkeys. See
+[MACROS.md](MACROS.md) for the recording/playback model and the F1 → **Makra** submenu
+(Nové makro, Ukončit nahrávání, Smazat makro, Uložit makra, Načíst makra) that manages
+them. Pressing a hotkey with a macro bound to it plays that macro back; pressing one with
+no macro bound does nothing special (falls through like any other unbound key).
+
+Alt+&lt;key&gt; arrives as `WM_SYSKEYDOWN`, not `WM_KEYDOWN` — `WindowProc` routes it
+through the same `OnKeyDown` handler (see `src/ui/window.cpp`), except for a bare Alt or
+F10 press, which are left to `DefWindowProcW`. Its `WM_CHAR` counterpart, `WM_SYSCHAR`, is
+swallowed unconditionally (return 0, never forwarded to `DefWindowProcW`) — this app has
+no menu bar/accelerators, so Windows' default handling of an unmatched `WM_SYSCHAR` is
+just a system beep, which would otherwise sound on every Alt+&lt;letter&gt; keypress.

@@ -13,19 +13,20 @@ src/
 │   └── config.h                kWriteEnabled, kBackupOnWrite, font settings
 ├── editor/
 │   ├── editor_core.h/cpp       EditorCore: line buffer, cursor, viewport
-│   └── command_engine.h/cpp    CommandEngine: name -> handler registry + dispatch
+│   ├── command_engine.h/cpp    CommandEngine: name -> handler registry + dispatch
+│   └── macro_engine.h/cpp      MacroEngine: recording buffer, macro table, .mac file I/O
 ├── io/
 │   └── file_io.h/cpp           LoadFile / SaveFile, UTF-8, BOM & line-ending detection
 └── ui/
     ├── window.h/cpp            window class, message loop, key/char handling, painting
     ├── status_bar.h/cpp        status line text + drawing
     ├── command_menu.h/cpp      F1 command menu: static tree + navigation + drawing
-    ├── input_box.h/cpp         generic single-line text input overlay (used by search)
-    └── notice_box.h/cpp        dismiss-on-any-key message overlay (used by search failures)
+    ├── input_box.h/cpp         generic single-line text input overlay (used by search, macro save/load filenames)
+    └── notice_box.h/cpp        dismiss-on-any-key message overlay (used by search failures, also reused as a plain prompt overlay for macro hotkey capture/confirm)
 ```
 
-Not yet implemented: `commands/` (individual command files), `macro_engine`, undo/redo,
-`backup.h/cpp` as a separate module (backup logic currently lives inline in `file_io.cpp`).
+Not yet implemented: `commands/` (individual command files), undo/redo, `backup.h/cpp` as
+a separate module (backup logic currently lives inline in `file_io.cpp`).
 
 ## Data flow
 
@@ -168,6 +169,54 @@ the eventual scope).
   the typed text) and from the F1 menu (`find.next` / `find.previous` with an empty
   argument).
 
+## Macro engine
+
+`MacroEngine` (`src/editor/macro_engine.h/cpp`) owns three things: whether it's currently
+recording, an in-progress `Macro` buffer (`std::vector<MacroStep>`, where `MacroStep` is
+just `{command, argument}` — the same shape `CommandContext` already uses), and a
+`std::map<hotkeyId, Macro>` of committed macros. It has no dependency on `EditorCore` or
+`CommandEngine` — it just stores and serializes command sequences.
+
+- **Recording hook**: `window.cpp`'s `Run()`/`RunFind()` — the same functions every key
+  and menu action already funnels through — call `RecordIfNeeded()` after dispatching,
+  which appends to the in-progress buffer if `MacroEngine::IsRecording()`. This is the
+  "intercept resolved commands, not raw keys" hook `MACROS.md` called for before this was
+  implemented.
+- **Playback**: `RunMacro(hotkeyId)` looks up the macro and replays each step through the
+  same low-level `DispatchCommand()` that `Run`/`RunFind` use internally — bypassing the
+  recording hook, so played-back steps aren't re-recorded into whatever might currently be
+  recording. If a step's command is the synthetic `macro.play` (a macro invoked from
+  inside another macro), `RunMacro` recurses instead of forwarding it to `CommandEngine`,
+  which has no such command.
+- **Hotkey shape**: `ResolveMacroHotkey(key, ctrl, alt, &id, &label)` in
+  `macro_engine.h/cpp` is the sole authority on what counts as a valid macro hotkey
+  (F2–F12, Ctrl+&lt;letter/digit&gt;, Alt+&lt;letter/digit&gt;, excluding Ctrl+S/Ctrl+Y
+  which are already bound). Both hotkey-capture UI flows and the playback dispatcher in
+  `window.cpp` call it, so the definition lives in exactly one place.
+- **UI flow**: the four commands that need more than a single keypress (`macro.new`,
+  `macro.delete`, `macro.save`, `macro.load`) are driven by a `MacroFlow` enum on
+  `WindowState` (`window.cpp`), each state consuming keys until it resolves:
+  `kAwaitNewHotkey`/`kAwaitDeleteHotkey` capture a raw hotkey via `OnKeyDown` (Esc
+  cancels), `kAwaitOverwriteConfirm` is a bare Enter/Esc prompt shown when "Nové makro"
+  targets a hotkey that already has a macro, and `kAwaitSaveName`/`kAwaitLoadName` reuse
+  the existing `InputBox` text-entry overlay for a `.mac` filename (`EnsureMacExtension`
+  appends `.mac` if the user didn't type it). Prompts during hotkey-capture states reuse
+  `NoticeBox` purely for its `Show`/`Draw`, without its auto-dismiss-on-any-key behaviour —
+  `window.cpp` drives `Show`/`Dismiss` explicitly instead.
+- **Alt+key routing**: Windows delivers Alt-held keystrokes as `WM_SYSKEYDOWN`, not
+  `WM_KEYDOWN`. `WindowProc` forwards `WM_SYSKEYDOWN` to the same `OnKeyDown` (except a
+  bare Alt or F10 press, left to `DefWindowProcW`), so Alt+&lt;letter&gt; macro hotkeys
+  work the same as Ctrl+&lt;letter&gt; ones.
+- **`.mac` files**: `MacroEngine::SaveToFile`/`LoadFromFile` use the same raw
+  `CreateFileW`/UTF-8 conversion pattern as `io::file_io.cpp` (duplicated locally rather
+  than shared, matching that file's own anonymous-namespace-per-file style). Save is
+  gated by `config::kWriteEnabled`, exactly like `io::SaveFile`; load always reads. See
+  [MACROS.md](MACROS.md#storage) for the file format.
+- **Menu integration**: `CommandMenu` gained a `MenuItem::enabled` flag and
+  `SetEnabled(command, enabled)` (recursive tree walk) so the F1 menu can grey out and
+  no-op "Ukončit nahrávání" while nothing is recording — `window.cpp` calls it right
+  before the menu becomes active.
+
 ## UI layout
 
 - Single top-level window, no menu bar.
@@ -181,7 +230,6 @@ the eventual scope).
 
 ## Not yet implemented
 
-- Macro engine (recording/playback), macro keybindings (F2–F12, Ctrl+*, Alt+*)
 - Auto-generating the F1 command menu tree from `CommandEngine::Names()` (currently hand-authored)
 - Undo/redo
 - Replace (only find is implemented)
