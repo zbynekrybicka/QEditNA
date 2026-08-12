@@ -1,8 +1,5 @@
-build/
 *.o
 *.d
-*.exe
 *.bak
-*.mac
 .vscode/
 txt/

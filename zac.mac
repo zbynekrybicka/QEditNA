@@ -1,0 +1,27 @@
+QEDITNA-MACRO v1
+[Alt+Y]
+edit.delete-forward	
+edit.delete-forward	
+edit.insert-char	 
+macro.play	Ctrl+L
+[Ctrl+F]
+find.search	<TEXT>
+[Ctrl+L]
+find.next	
+[Ctrl+P]
+find.previous	
+[Alt+K]
+block.mark-column-start
+[Alt+L]
+block.mark-line-start
+[Alt+J]
+block.mark-line-end
+block.mark-column-end
+[Ctrl+C]
+block.copy
+[Ctrl+V]
+block.move
+[CTRL+X]
+block.delete
+[F12]
+block.cancel
